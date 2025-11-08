@@ -1,0 +1,23 @@
+# FastAPI for the API server
+fastapi
+uvicorn
+
+# LangChain core
+langchain
+langchain-core
+langchain-pinecone              # LangChain integration for Pinecone
+langchain-community             # For Ollama (LLM) and BGE (Embedding) integrations
+
+# Self-hosted LLM/Embedding
+langchain-ollama
+sentence-transformers           # Required for loading BGE model via LangChain
+
+# RAG essentials
+pinecone-client
+pypdf                           # For loading PDF documents (optional, add based on file types)
+python-dotenv                   # For managing environment variables
+
+# Voice Activation (Non-RAG, but required for the "Jarvis" feel)
+pvporcupine                     # Picovoice Porcupine (Wake Word)
+vosk                            # Speech-to-Text (STT)
+coqui-tts                       # Text-to-Speech (TTS)
