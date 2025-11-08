@@ -9,18 +9,22 @@ SESSION_ID = f"test_session_{int(time.time())}" # Unique session ID for memory t
 
 # --- Test Queries ---
 # Query 1: Tests RAG retrieval (must use your college notes)
-QUERY_1 = "What are the main topics covered in the ML course and who is the professor?"
+QUERY_1 = "Can you tell me about types of ML Models?"
 
 # Query 2: Tests Conversational Memory (references Q1)
-QUERY_2 = "Can you give me the due date for the first assignment in that course?" 
+QUERY_2 = "Explain Supervised Learning in that course." 
 
+
+# In your test_backend.py file, inside the post_query function:
 
 def post_query(query: str, session_id: str):
     """Sends a POST request to the /chat endpoint."""
     payload = {
-        "query": query,
+        # ✅ FIX: Change the payload key from "query" to "question"
+        "question": query, 
         "session_id": session_id
     }
+    # ... rest of the function ...
     
     print(f"\n[QUERY] Boss: {query}")
     
@@ -28,7 +32,7 @@ def post_query(query: str, session_id: str):
         response = requests.post(
             CHAT_ENDPOINT,
             json=payload, # Send payload as JSON body
-            timeout=120 # Allow 30 seconds for Ollama/LLM response
+            timeout=120 # Allow 120 seconds for Ollama/LLM response
         )
         response.raise_for_status() # Raises exception for 4xx or 5xx errors
         

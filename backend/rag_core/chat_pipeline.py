@@ -1,25 +1,35 @@
 import os
+import logging
 from typing import Dict, Any, List
 from dotenv import load_dotenv
 
-# LangChain imports
+# --- Modern LangChain Imports ---
+# FIX: Using the core, modern history store for guaranteed compatibility
+from langchain_classic.memory import ChatMessageHistory # The compatible store
+from langchain_core.chat_history import BaseChatMessageHistory 
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_community.llms import Ollama
-from langchain_community.embeddings import HuggingFaceBgeEmbeddings
-from langchain_pinecone import PineconeVectorStore
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough, RunnableWithMessageHistory
-from langchain_classic.memory.buffer import ConversationBufferMemory
 from langchain_core.documents import Document
+from langchain_ollama import OllamaLLM
+from langchain_pinecone import PineconeVectorStore
+from langchain_huggingface import HuggingFaceEmbeddings # MODERN EMBEDDINGS
 from langchain_core.messages import HumanMessage, AIMessage
 
-# Load environment variables
+#Removed the unused and confusing legacy ConversationBufferMemory import
+
+# --- Configuration & Global State ---
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 load_dotenv()
+
+# Global Session Store for Memory (FIXED to use compatible type)
+STORE: Dict[str, BaseChatMessageHistory] = {}
 PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama2") 
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
 BGE_MODEL_NAME = "BAAI/bge-small-en-v1.5"
 
-# Jarvis's System Prompt
+# --- Jarvis Prompt (Standard Keys) ---
 JARVIS_SYSTEM_PROMPT = """
 You are Jarvis, a highly intelligent, witty, and sophisticated AI assistant.
 Always maintain a British, professional, and slightly humorous tone, similar to the original fictional AI.
@@ -32,80 +42,129 @@ Do NOT invent information.
 
 CONTEXT:
 {context}
-
-Current conversation:
-{chat_history}
-
-Question: {question}
 """
 
-def format_chat_history(chat_history: List[Dict]) -> str:
-    """Format the chat history into a string."""
-    formatted_messages = []
-    for message in chat_history:
-        if isinstance(message, HumanMessage):
-            formatted_messages.append(f"Human: {message.content}")
-        elif isinstance(message, AIMessage):
-            formatted_messages.append(f"Assistant: {message.content}")
-    return "\n".join(formatted_messages)
+# --- Helper Functions ---
 
-def create_retrieval_chain(retriever: Any, prompt: ChatPromptTemplate) -> RunnablePassthrough:
-    """Create the RAG retrieval chain."""
-    return RunnablePassthrough.assign(
-        context=lambda x: retriever.get_relevant_documents(x["question"]),
-        chat_history=lambda x: format_chat_history(x.get("chat_history", [])),
-        question=lambda x: x["question"]
-    ) | prompt | StrOutputParser()
+def _combine_documents(docs: List[Document]) -> str:
+    """Combines list of Document objects (from retriever) into a single string for context."""
+    return "\n\n".join(doc.page_content for doc in docs)
+
+# FIX: Memory Retrieval now returns the compatible ChatMessageHistory
+def get_session_history(session_id: str) -> BaseChatMessageHistory:
+    """Retrieves or creates a BaseChatMessageHistory instance for a given session ID."""
+    global STORE
+    if session_id not in STORE:
+        # FIX: Store the guaranteed compatible class (ChatMessageHistory)
+        STORE[session_id] = ChatMessageHistory()
+        logger.info("Created new memory store for session: %s", session_id)
+    return STORE[session_id]
+
+# --- Core RAG Chain Initialization (MODERN LCEL) ---
+
+def _extract_question(x: Any) -> str:
+    """Safely extract question text from various input types."""
+    if isinstance(x, dict):
+        return x.get("input", "") or x.get("question", "") or x.get("text", "")
+    if isinstance(x, str):
+        return x
+    if hasattr(x, "content"):
+        return str(getattr(x, "content", ""))
+    return str(x)
+
+def _get_chat_history(x: Any) -> List[Any]:
+    """Safely extract chat history from various input types."""
+    if isinstance(x, dict):
+        return x.get("chat_history", [])
+    return []
+
+def _retrieve_documents(retriever: Any, query: str, k: int = 3) -> List[Document]:
+    """Safely retrieve documents using modern or legacy retriever interfaces."""
+    if not query.strip():
+        return []
+    
+    try:
+        # Try modern retrieve() method first
+        if hasattr(retriever, "retrieve"):
+            return retriever.retrieve(query)
+            
+        # Fall back to legacy get_relevant_documents
+        if hasattr(retriever, "get_relevant_documents"):
+            return retriever.get_relevant_documents(query)
+            
+        # Last resort: try direct similarity search on vectorstore
+        if hasattr(retriever, "vectorstore"):
+            vs = retriever.vectorstore
+            if hasattr(vs, "similarity_search"):
+                return vs.similarity_search(query, k=k)
+                
+    except Exception as e:
+        logger.warning(f"Document retrieval failed: {e}")
+        return []
+    
+    return []
 
 def get_jarvis_chain():
-    """Initialize and return the complete Jarvis RAG chain with memory."""
-    print("Initializing Jarvis RAG chain...")
+    logger.info("Initializing Jarvis RAG chain...")
 
-    # 1. Initialize LLM
-    llm = Ollama(
-        model=OLLAMA_MODEL,
-        temperature=0.4,
-        stop=["Human:", "Assistant:"]
+    # 1. Initialize LLM & Embeddings
+    llm = OllamaLLM(
+        model=OLLAMA_MODEL, 
+        temperature=0.4, 
+        stop=["<|eot_id|>", "<|start_header_id|>", "Human:", "Assistant:"]
     )
-
-    # 2. Initialize Embeddings and Vector Store
-    embeddings = HuggingFaceBgeEmbeddings(
+    embeddings = HuggingFaceEmbeddings(
         model_name=BGE_MODEL_NAME,
-        model_kwargs={'device': 'cpu'},
-        encode_kwargs={'normalize_embeddings': True}
+        model_kwargs={"device": "cpu"},
+        encode_kwargs={"normalize_embeddings": True}
     )
-    
     vectorstore = PineconeVectorStore.from_existing_index(
         index_name=PINECONE_INDEX_NAME,
         embedding=embeddings
     )
     retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
 
-    # 3. Create Memory
-    memory = ConversationBufferMemory(
-        memory_key="chat_history",
-        return_messages=True
+    # 2. Create the contextualizing prompt with safe input handling
+    contextualize_q_prompt = ChatPromptTemplate.from_messages([
+        ("system", "Given the chat history and the new question, generate a standalone question that captures all necessary context for retrieval. Do not answer the question."),
+        MessagesPlaceholder("chat_history"),
+        ("human", "{question}"),  # Changed from {input} to {question}
+    ])
+
+    # 3. Create standalone question chain with input mapping
+    standalone_question_chain = RunnablePassthrough.assign(
+        question=lambda x: _extract_question(x),
+        chat_history=lambda x: _get_chat_history(x)
+    ) | contextualize_q_prompt | llm | StrOutputParser()
+
+    # 4. Final answer prompt
+    qa_prompt = ChatPromptTemplate.from_messages([
+        ("system", JARVIS_SYSTEM_PROMPT),
+        MessagesPlaceholder("chat_history"),
+        ("human", "{question}"),  # Changed from {input} to {question}
+    ])
+
+    # 5. Create the RAG chain with safe input handling
+    rag_chain = (
+        RunnablePassthrough.assign(
+            question=lambda x: _extract_question(x),
+            chat_history=lambda x: _get_chat_history(x),
+            context=lambda x: _combine_documents(
+                _retrieve_documents(retriever, _extract_question(x))
+            )
+        )
+        | qa_prompt
+        | llm
+        | StrOutputParser()
     )
 
-    # 4. Create Prompt
-    prompt = ChatPromptTemplate.from_template(JARVIS_SYSTEM_PROMPT)
-
-    # 5. Create RAG Chain
-    rag_chain = create_retrieval_chain(retriever, prompt)
-
-    # 6. Create Final Chain with Memory
+    # 6. Create final chain with memory
     final_chain = RunnableWithMessageHistory(
         rag_chain,
-        lambda session_id: memory,
-        input_messages_key="question",
-        history_messages_key="chat_history"
+        get_session_history,
+        input_messages_key="question",  # Changed from input to question
+        history_messages_key="chat_history",
     )
 
-    print("✅ Jarvis chain initialized and ready.")
+    logger.info("Jarvis chain initialized.")
     return final_chain
-
-if __name__ == "__main__":
-    # Test the chain
-    chain = get_jarvis_chain()
-    response = chain.invoke({"question": "What can you tell me about machine learning?"})
-    print(response)
