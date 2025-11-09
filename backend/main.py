@@ -1,7 +1,7 @@
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse 
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import logging
@@ -9,6 +9,7 @@ import threading
 import os
 from contextlib import asynccontextmanager
 import asyncio 
+import json # Used for structuring the streaming response
 
 # Import the necessary RAG components from your modules
 from rag_core import get_jarvis_chain 
@@ -77,12 +78,34 @@ app.mount("/audio", StaticFiles(directory="voice_activation/tts_output"), name="
 # --- Request/Response Schemas ---
 
 class ChatRequest(BaseModel):
-    # This is the expected field name from the client payload
+    # This is the expected input key for the RAG chain
     question: str 
     session_id: str = "default_user" 
 
 class ChatResponse(BaseModel):
     answer: str
+
+
+# --- Streaming Generator ---
+
+async def invoke_stream(chain, input_data, config):
+    """Generator function to stream results from the LangChain thread."""
+    
+    # Call the stream method synchronously inside an asyncio worker thread
+    stream_generator = await asyncio.to_thread(
+        chain.stream,
+        input_data,
+        config
+    )
+    
+    # Iterate over the synchronous generator and yield results asynchronously
+    for chunk in stream_generator:
+        # The chain outputs a dictionary, we only want the 'answer' chunk
+        token = chunk.get('answer', '')
+        if token:
+            # Send the raw text token
+            yield token
+
 
 # --- API Endpoints ---
 
@@ -94,39 +117,39 @@ def read_root():
     else:
         raise HTTPException(status_code=503, detail="RAG Chain Initialization Failed.")
 
+
+@app.post("/stream_chat")
+async def stream_chat_endpoint(request: ChatRequest):
+    """Endpoint for streaming LLM responses token-by-token using plain text streaming."""
+    if not jarvis_chain:
+        raise HTTPException(status_code=503, detail="Jarvis RAG Chain is not initialized.")
+    
+    # Input data for the chain invocation
+    input_data = {"question": request.question}
+    config = {"configurable": {"session_id": request.session_id}}
+
+    logging.info(f"Received STREAM query for session '{request.session_id}': {request.question}")
+
+    # Use StreamingResponse with the generator
+    return StreamingResponse(
+        invoke_stream(jarvis_chain, input_data, config),
+        media_type="text/plain" # Use plain text for raw token streaming
+    )
+
+
 @app.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(request: ChatRequest):
-    """Endpoint for processing text queries through the RAG pipeline."""
-    if not jarvis_chain:
-         raise HTTPException(status_code=503, detail="Jarvis RAG Chain is not initialized.")
+    """(Kept for compatibility) Endpoint for processing text queries, but it will block."""
+    raise HTTPException(status_code=400, detail="Use /stream_chat endpoint for real-time interaction.")
 
-    # Logging uses the standard 'question' attribute
-    logging.info(f"Received text query for session '{request.session_id}': {request.question}")
-    
-    try:
-        # ✅ FINAL INVOCATION: Invokes the chain using the 'question' key as required by the chain logic
-        response = await asyncio.to_thread(
-            jarvis_chain.invoke,
-            {"question": request.question}, 
-            config={"configurable": {"session_id": request.session_id}}
-        )
-        
-        # Handle string response from the chain
-        return ChatResponse(answer=response if isinstance(response, str) else str(response))
 
-    except Exception as e:
-        logging.error(f"Error processing text chat request: {e}")
-        return ChatResponse(
-            answer="I apologize, Boss, but I encountered a system error while processing your request."
-        )
-
-# --- Voice Endpoints ---
+# --- Voice Endpoints (TTS calls wrapped in to_thread, as fixed earlier) ---
 
 @app.get("/get_voice_query")
 async def get_voice_query():
     """Endpoint for the frontend to retrieve transcribed text."""
     transcribed_text = get_transcribed_query()
-    
+    # ... (rest of function remains the same) ...
     if transcribed_text:
         logging.info(f"Transcribed query retrieved: {transcribed_text}")
         return {"status": "ready", "query": transcribed_text}
@@ -142,7 +165,7 @@ async def get_handshake_reply_endpoint():
     if handshake_text:
         logging.info(f"Handshake signal received: '{handshake_text}'")
         
-        # ✅ FIX: TTS moved to separate thread
+        # FIX: Run synchronous TTS generation in a separate thread
         audio_file_path = await asyncio.to_thread(
             generate_tts_audio,
             handshake_text,
@@ -162,13 +185,13 @@ async def get_handshake_reply_endpoint():
 @app.post("/speak", response_class=JSONResponse)
 async def speak_endpoint(request: ChatRequest):
     """Generates audio from Jarvis's text response using Coqui TTS and returns the URL."""
-    if not request.question: 
+    if not request.question:
         raise HTTPException(status_code=400, detail="Text required for TTS generation.")
 
-    # ✅ FIX: TTS moved to separate thread
+    # FIX: Run synchronous TTS generation in a separate thread
     audio_file_path = await asyncio.to_thread(
         generate_tts_audio,
-        request.question, # Uses the question attribute
+        request.question,
         request.session_id
     )
     
