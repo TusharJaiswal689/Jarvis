@@ -4,10 +4,9 @@
 const API_URL = 'http://127.0.0.1:8000';
 const POLLING_INTERVAL = 300; // Milliseconds to poll the backend (300ms = 3 times per second)
 let currentSessionId = `jarvis_session_${Date.now()}`;
-let currentAudioUrl = null; // Stores the URL of the generated audio to prevent replay loops
-let currentMode = 'voice'; // Tracks if the user last used 'voice' or 'text'
-const MAX_CONCURRENT_POLLS = 1; // Limit concurrent HTTP calls to avoid overloading the event loop
-let activePolls = 0; // Counter for active polling requests
+let activePolls = 0; 
+const MAX_CONCURRENT_POLLS = 1;
+let isThinking = false; 
 
 // --- Element References ---
 const hub = document.getElementById('hub');
@@ -15,13 +14,11 @@ const statusText = document.getElementById('listeningText');
 const statusDiv = document.getElementById('status');
 const micDot = document.getElementById('micDot');
 const chatBox = document.getElementById('chat-box');
-const chatInput = document.getElementById('chat-input');
-const chatSendBtn = document.getElementById('chat-send-btn');
 const pulse = document.getElementById('pulse');
 const ttsAudio = document.getElementById('ttsAudio');
+const chatHistoryContainer = document.getElementById('chat-history-container'); 
 
 // --- UI STATE MANAGEMENT ---
-// State definitions drive the visual updates
 const UI_STATE = {
     IDLE: { text: "Listening for 'Hey Jarvis'", ringClass: "state-listening", dot: false, pulsing: false },
     HANDSHAKE: { text: "Hey Boss, what's up?", ringClass: "state-active", dot: true, pulsing: true },
@@ -30,17 +27,58 @@ const UI_STATE = {
     SPEAKING: { text: "Speaking...", ringClass: "state-active", dot: false, pulsing: false }
 };
 
+function setInputLock(isLocked) {
+    const chatInput = document.getElementById('chat-input');
+    const chatSendBtn = document.getElementById('chat-send-btn');
+    const chatClearBtn = document.getElementById('chat-clear-btn');
+    
+    chatInput.disabled = isLocked;
+    chatSendBtn.disabled = isLocked;
+    chatClearBtn.disabled = isLocked; 
+    
+    isThinking = isLocked;
+    chatInput.placeholder = isLocked ? "Jarvis is processing your request..." : "Ask a question, Boss (Text Mode)...";
+}
+
 function updateUI(state, customText = null) {
     statusText.innerText = customText || state.text;
     hub.className = 'hub ' + state.ringClass;
     micDot.classList.toggle('on', state.dot);
     pulse.classList.toggle('on', state.pulsing);
-    statusDiv.innerText = state.text; // Update statusDiv for clearer feedback
+    statusDiv.innerText = state.text;
+    
+    const locked = (state === UI_STATE.THINKING || state === UI_STATE.SPEAKING);
+    setInputLock(locked);
+}
+
+// --- Chat History Display & Clear Functions ---
+function displayMessage(sender, text) {
+    const messageElement = document.createElement('div');
+    messageElement.classList.add('chat-message', sender.toLowerCase());
+    messageElement.innerHTML = `<strong>${sender}:</strong> ${text}`;
+    
+    chatHistoryContainer.appendChild(messageElement);
+    
+    // Scroll to the bottom
+    chatHistoryContainer.scrollTop = chatHistoryContainer.scrollHeight;
+}
+
+function clearChatHistory() {
+    if (isThinking) {
+        console.warn("Cannot clear chat while processing.");
+        return;
+    }
+    
+    if (confirm("Are you sure you want to clear the chat history? This will also reset Jarvis's memory for this session.")) {
+        chatHistoryContainer.innerHTML = '';
+        currentSessionId = `jarvis_session_${Date.now()}`;
+        console.log("Chat history cleared and new session started:", currentSessionId);
+        updateUI(UI_STATE.IDLE, "Session Cleared. Ready for new query.");
+    }
 }
 
 // --- API Helpers ---
 
-// CRITICAL: Sends query to RAG pipeline (FastAPI /chat)
 async function submitTextQuery(question) {
     const payload = {
         question: question,
@@ -56,18 +94,17 @@ async function submitTextQuery(question) {
         if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
         
         const data = await response.json();
-        return data.answer; // Returns Jarvis's text response
+        return data.answer; 
 
     } catch (error) {
         console.error('RAG Query Failed:', error);
-        return `My apologies, Boss. The RAG system encountered an internal error. (${error.message})`;
+        return `My apologies, Boss. The RAG system encountered an internal error. (Status: ${error.message})`; 
     }
 }
 
-// CRITICAL: Generates TTS audio file on the backend and returns the URL
 async function getAudioURL(text, sessionId) {
     const payload = {
-        question: text, // Reuse ChatRequest structure
+        question: text, 
         session_id: sessionId
     };
     try {
@@ -80,21 +117,17 @@ async function getAudioURL(text, sessionId) {
         if (!response.ok) throw new Error(`TTS generation failed: ${response.status}`);
         
         const data = await response.json();
-        return `${API_URL}${data.audio_url}`; // Full URL, e.g., http://127.0.0.1:8000/audio/jarvis_...wav
+        return `${API_URL}${data.audio_url}`; 
 
     } catch (error) {
         console.error('TTS Generation Failed:', error);
-        // Fallback to text if audio fails
         return null;
     }
 }
 
-// CRITICAL: Plays the audio URL and manages the SPEAKING state
 function playAudio(url, callback) {
     ttsAudio.src = url;
-    currentAudioUrl = url; // Store the current URL
     
-    // Ensure we reset state when audio finishes
     ttsAudio.onended = () => {
         updateUI(UI_STATE.IDLE);
         if (callback) callback();
@@ -113,8 +146,7 @@ function playAudio(url, callback) {
 // --- Voice Polling Loop (The state machine) ---
 
 async function checkBackendStatus() {
-    // Limit polling concurrency
-    if (activePolls >= MAX_CONCURRENT_POLLS || ttsAudio.paused === false) {
+    if (isThinking || ttsAudio.paused === false || activePolls >= MAX_CONCURRENT_POLLS) {
         return;
     }
     
@@ -127,16 +159,14 @@ async function checkBackendStatus() {
         
         if (handshakeData.status === 'ready' && handshakeData.audio_url) {
             
-            // WAKE WORD HANDSHAKE START: Jarvis says "Hey Boss, what's up?"
+            // WAKE WORD HANDSHAKE START
             updateUI(UI_STATE.HANDSHAKE);
             const fullAudioUrl = `${API_URL}${handshakeData.audio_url}`;
             
-            // Play the handshake audio, then immediately poll for the user query
             playAudio(fullAudioUrl, () => {
-                // Once Jarvis finishes talking, transition UI to actively listening for transcription
                 updateUI(UI_STATE.QUERYING); 
             });
-            return; // Exit poll cycle to wait for playback/transcription
+            return; 
         }
 
 
@@ -146,12 +176,12 @@ async function checkBackendStatus() {
 
         if (queryData.status === 'ready' && queryData.query) {
             
-            // QUERY RETRIEVED: User's voice command is ready for RAG
+            // QUERY RETRIEVED
             updateUI(UI_STATE.THINKING, `Query: "${queryData.query}"`);
             
-            // Call the main handler
-            handleChatSubmission(queryData.query, 'voice');
-            return; // Exit poll cycle until RAG and TTS are complete
+            // Call the main handler (Voice Mode)
+            await handleChatSubmission(queryData.query, 'voice');
+            return; 
         }
 
     } catch (error) {
@@ -166,40 +196,36 @@ async function checkBackendStatus() {
 // --- Main Handler for RAG Submission (Voice and Text) ---
 
 async function handleChatSubmission(question, sourceMode) {
-    currentMode = sourceMode;
     
-    // RAG Processing: Get text response from backend
+    // 1. Display user question first (This should be done *before* calling this handler)
+
+    // 2. RAG Processing: Get text response from backend
     const textResponse = await submitTextQuery(question);
     
+    // 3. Display Jarvis's response
     if (sourceMode === 'voice') {
-        // Voice Mode: Generate and play audio response
-        updateUI(UI_STATE.THINKING, "Generating Jarvis's Reply...");
-
+        
         const audioUrl = await getAudioURL(textResponse, currentSessionId);
         
         if (audioUrl) {
             playAudio(audioUrl, () => {
-                // Return to IDLE after speaking
-                updateUI(UI_STATE.IDLE);
+                displayMessage('Jarvis', textResponse); 
             });
         } else {
-            // Fallback for TTS failure: Display text and wait 3s
-            updateUI(UI_STATE.IDLE, textResponse); 
-            setTimeout(() => updateUI(UI_STATE.IDLE), 3000);
+            displayMessage('Jarvis', textResponse); 
+            updateUI(UI_STATE.IDLE); // Unlock if TTS fails
         }
     } else {
-        // Text Mode: Display text response only (Per requirement #2)
-        updateUI(UI_STATE.IDLE, "Text Mode Active"); // Reset hub visual
-        statusDiv.innerText = textResponse; // Display full response in the status area
+        // Text Mode: Display text response only
+        displayMessage('Jarvis', textResponse); 
+        updateUI(UI_STATE.IDLE, "Text Mode Active"); // Unlock immediately
     }
 }
 
-// --- 4. Initialization & Listeners ---
+// --- Initialization & Listeners ---
 
-// FIX: Request Microphone Permission (The critical fix)
 async function requestMicrophonePermission() {
     try {
-        // This is the call that triggers the OS permission dialog
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
         stream.getTracks().forEach(track => track.stop()); 
         console.log("Microphone access granted.");
@@ -212,25 +238,48 @@ async function requestMicrophonePermission() {
 }
 
 function setupTextChatListeners() {
+    const chatInput = document.getElementById('chat-input');
+    const chatSendBtn = document.getElementById('chat-send-btn');
+    const chatClearBtn = document.getElementById('chat-clear-btn');
+    
     // Listener for the Send button
     chatSendBtn.addEventListener('click', async () => {
-        const question = chatInput.value.trim();
+        const question = chatInput.value.trim(); 
+        
+        if (isThinking) {
+            console.warn("System busy. Please wait for the current reply.");
+            return; 
+        }
+
         if (question) {
+            // 1. Lock input
+            setInputLock(true); 
+            
+            // 2. Display user question for immediate feedback
+            displayMessage('Boss', question); 
+
+            // 3. Clear input field immediately
+            chatInput.value = ''; 
+
+            // 4. Update UI to thinking state while waiting for API
             updateUI(UI_STATE.THINKING, "Sending Text Query...");
-            // Call the main chat API function
+
+            // 5. Process query (Wait for response)
             await handleChatSubmission(question, 'text'); 
-            chatInput.value = ''; // Clear input field
         }
     });
 
     // Listener for the Enter key
     chatInput.addEventListener('keypress', (event) => {
         if (event.key === 'Enter') {
-            event.preventDefault(); // Prevent newline in input
+            event.preventDefault(); 
             chatSendBtn.click();
         }
     });
     
+    // Listener for Clear Button
+    chatClearBtn.addEventListener('click', clearChatHistory);
+
     // Listener to toggle visibility of the chatbox when hub is clicked
     hub.addEventListener('click', () => {
         chatBox.classList.toggle('visible');
@@ -242,21 +291,17 @@ function setupTextChatListeners() {
         }
     });
 
-    // Initial check for visibility (Chatbox is hidden by default in CSS, but this is a double-check)
-    chatBox.classList.add('visible'); // Start in text mode since it's the primary manual input
+    chatBox.classList.add('visible');
 }
 
 
 document.addEventListener('DOMContentLoaded', async () => {
-    // A. Request permission immediately
     const hasPermission = await requestMicrophonePermission();
     
-    // B. Start the core voice loop (Polling runs continuously)
     if (hasPermission) {
         setInterval(checkBackendStatus, POLLING_INTERVAL);
     }
     
-    // C. Set up event listeners for the text chatbox
     setupTextChatListeners();
-    updateUI(UI_STATE.IDLE); // Set initial UI state
+    updateUI(UI_STATE.IDLE); 
 });

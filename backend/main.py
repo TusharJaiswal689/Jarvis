@@ -8,9 +8,10 @@ import logging
 import threading
 import os
 from contextlib import asynccontextmanager
+import asyncio 
 
 # Import the necessary RAG components from your modules
-from rag_core import get_jarvis_chain # CLEAN IMPORT
+from rag_core import get_jarvis_chain 
 from voice_activation.wake_listener import start_voice_listener, get_transcribed_query, get_handshake_reply 
 from voice_activation.tts_generator import generate_tts_audio 
 
@@ -20,7 +21,7 @@ logging.basicConfig(level=logging.INFO)
 # --- Global Variables for Lifespan ---
 listener_thread = None
 is_listening = threading.Event()
-MICROPHONE_INDEX = 0 # Confirmed mic index
+MICROPHONE_INDEX = 0 
 jarvis_chain = None 
 
 # --- Lifespan Context Manager ---
@@ -76,7 +77,7 @@ app.mount("/audio", StaticFiles(directory="voice_activation/tts_output"), name="
 # --- Request/Response Schemas ---
 
 class ChatRequest(BaseModel):
-    # ✅ FIX: Aligning input key to 'question' for the RAG chain
+    # This is the expected field name from the client payload
     question: str 
     session_id: str = "default_user" 
 
@@ -99,12 +100,14 @@ async def chat_endpoint(request: ChatRequest):
     if not jarvis_chain:
          raise HTTPException(status_code=503, detail="Jarvis RAG Chain is not initialized.")
 
+    # Logging uses the standard 'question' attribute
     logging.info(f"Received text query for session '{request.session_id}': {request.question}")
     
     try:
-        # The chain returns a string directly, not a dict
-        response = jarvis_chain.invoke(
-            {"question": request.question},
+        # ✅ FINAL INVOCATION: Invokes the chain using the 'question' key as required by the chain logic
+        response = await asyncio.to_thread(
+            jarvis_chain.invoke,
+            {"question": request.question}, 
             config={"configurable": {"session_id": request.session_id}}
         )
         
@@ -139,9 +142,11 @@ async def get_handshake_reply_endpoint():
     if handshake_text:
         logging.info(f"Handshake signal received: '{handshake_text}'")
         
-        audio_file_path = generate_tts_audio(
-            text=handshake_text,
-            session_id="handshake"
+        # ✅ FIX: TTS moved to separate thread
+        audio_file_path = await asyncio.to_thread(
+            generate_tts_audio,
+            handshake_text,
+            "handshake"
         )
         
         if audio_file_path:
@@ -157,12 +162,14 @@ async def get_handshake_reply_endpoint():
 @app.post("/speak", response_class=JSONResponse)
 async def speak_endpoint(request: ChatRequest):
     """Generates audio from Jarvis's text response using Coqui TTS and returns the URL."""
-    if not request.question:
+    if not request.question: 
         raise HTTPException(status_code=400, detail="Text required for TTS generation.")
 
-    audio_file_path = generate_tts_audio(
-        text=request.question,
-        session_id=request.session_id
+    # ✅ FIX: TTS moved to separate thread
+    audio_file_path = await asyncio.to_thread(
+        generate_tts_audio,
+        request.question, # Uses the question attribute
+        request.session_id
     )
     
     if audio_file_path:
