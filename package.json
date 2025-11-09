@@ -1,0 +1,24 @@
+{
+  "name": "jarvis-ai-agent-frontend",
+  "version": "1.0.0",
+  "description": "Electron frontend for the FastAPI RAG Chatbot.",
+  "main": "frontend/main.js",
+  "scripts": {
+    "start": "electron . --no-sandbox",
+    "test": "echo \"No test specified\" && exit 1"
+  },
+  "keywords": [
+    "electron",
+    "fastapi",
+    "python",
+    "voice-assistant"
+  ],
+  "author": "Boss",
+  "license": "ISC",
+  "dependencies": {
+    "package.json": "^0.0.0"
+  },
+  "devDependencies": {
+    "electron": "^39.1.1"
+  }
+}
