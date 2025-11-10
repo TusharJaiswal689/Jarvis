@@ -1,154 +1,159 @@
 <!doctype html>
 <html lang="en">
 <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Jarvis — Frontend</title>
-    <style>
-        /* --- Global Styles --- */
-        :root{--circle-size:180px;--accent:#00bfff}
-        html,body{height:100%;margin:0;background:#000;color:#fff;font-family:Inter,Segoe UI,system-ui,Arial}
-        .stage{height:100%;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;flex-direction: column;}
-        canvas#waves{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}
-        
-        /* --- Hub (The Circle) --- */
-        .hub{
-          width:var(--circle-size);height:var(--circle-size);
-          border-radius:50%;background:linear-gradient(135deg,#111,#0b0b0b);
-          display:flex;align-items:center;justify-content:center;flex-direction:column;
-          box-shadow:0 0 40px rgba(0,255,255,0.03), inset 0 -8px 24px rgba(0,0,0,0.6);
-          transition:transform .18s ease, box-shadow .18s ease, background .18s;
-          z-index: 20; 
-          margin-top: -300px; /* ✅ FIX 1: Pushes hub near the top edge */
-          border: 2px solid rgba(0, 191, 255, 0.6); 
-        }
-        .hub .label{font-size:20px;letter-spacing:1px;color:var(--accent);font-weight:700}
-        .hub .sub{font-size:11px;color:#7f9a9a;margin-top:6px}
-        .hub.active{
-          transform:scale(1.06);
-          box-shadow:0 0 60px rgba(0,255,255,0.3), 0 10px 60px rgba(0,0,0,0.7);
-          background:linear-gradient(135deg,#001e1e,#001214);
-        }
-        
-        /* --- Pulse Animation --- */
-        .pulse{
-          position:absolute;width:calc(var(--circle-size) + 40px);height:calc(var(--circle-size) + 40px);
-          border-radius:50%;left:50%;top:50%;z-index:5;pointer-events:none;
-          opacity:0;box-shadow:0 0 0 3px rgba(0,255,255,0.08),0 0 60px rgba(0,255,255,0.04);
-          transition:opacity .25s ease;
-          /* ✅ FIX 2: Align pulse with new hub position */
-          transform:translate(-50%,-50%) translateY(-300px); 
-        }
-        .pulse.on{opacity:1;animation:pulseAnim 1.6s ease-out infinite}
-        @keyframes pulseAnim{
-          0%{transform:translate(-50%,-50%) translateY(-300px) scale(.9);opacity:.6}
-          70%{opacity:.08}
-          100%{transform:translate(-50%,-50%) translateY(-300px) scale(1.8);opacity:0}
-        }
-        
-        /* --- Chat History Container (Responsive Reading Pane) --- */
-        #chat-history-container {
-            position: absolute;
-            top: 350px; /* ✅ FIX 3: Start the reading pane clearly BELOW the circle */
-            bottom: 90px; 
-            width: 90%;
-            max-width: 580px; 
-            height: auto; 
-            overflow-y: auto; 
-            padding: 15px;
-            z-index: 15; 
-            left: 50%;
-            transform: translateX(-50%);
-            
-            background: rgba(0, 0, 0, 0.4); 
-            border: 1px solid rgba(0, 191, 255, 0.2);
-            border-radius: 8px;
-            pointer-events: all; 
-        }
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Jarvis — Frontend</title>
+  <style>
+    :root { --circle-size:180px; --accent:#00bfff }
 
-        /* --- Status and Input --- */
-        .status{position:absolute;bottom:70px;width:100%;text-align:center;font-size:13px;color:#9fbfbf;z-index:12}
-        .hint{position:absolute;top:20px;left:20px;color:#6f8f8f;font-size:12px;z-index:12}
-        
-        .chat-message {
-            padding: 5px 0;
-            font-size: 0.95rem;
-            line-height: 1.3;
-        }
-        .chat-message.boss {
-            text-align: right;
-            color: #7ff;
-        }
-        .chat-message.jarvis {
-            text-align: left;
-            color: var(--accent);
-        }
+    html, body {
+      height:100%; margin:0; background:#000; color:#fff;
+      font-family:Inter,Segoe UI,system-ui,Arial;
+      overflow:hidden;
+    }
 
-        /* --- Chat Box Overlay (Input Bar) --- */
-        #chat-box{
-            position: fixed; 
-            bottom: 20px;
-            width: 90%;
-            max-width: 580px; 
-            padding: 10px;
-            background: #111;
-            border: 1px solid var(--accent);
-            border-radius: 8px;
-            box-shadow: 0 0 15px rgba(0, 191, 255, 0.4);
-            display: flex;
-            z-index: 30; 
-            left: 50%;
-            transform: translateX(-50%);
-        }
-        #chat-input{
-            flex-grow: 1;
-            background: #000;
-            border: none;
-            color: var(--accent);
-            padding: 10px;
-            font-size: 14px;
-            outline: none;
-        }
-        #chat-send-btn, #chat-clear-btn{
-            background: var(--accent);
-            color: #000;
-            border: none;
-            padding: 8px 15px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-weight: bold;
-            transition: background 0.2s;
-            margin-left: 5px;
-        }
-        #chat-send-btn:hover, #chat-clear-btn:hover{
-            background: #7ff;
-        }
-    </style>
+    .stage {
+      height:100%; display:flex; align-items:center; justify-content:center;
+      flex-direction:column; position:relative; overflow:hidden;
+    }
+
+    canvas#waves {
+      position:absolute; left:0; top:0; width:100%; height:100%; pointer-events:none;
+    }
+
+    /* --- Jarvis Circle --- */
+    .hub {
+      width:var(--circle-size); height:var(--circle-size);
+      border-radius:50%;
+      background:linear-gradient(135deg,#111,#0b0b0b);
+      display:flex; align-items:center; justify-content:center; flex-direction:column;
+      box-shadow:0 0 40px rgba(0,255,255,0.03), inset 0 -8px 24px rgba(0,0,0,0.6);
+      transition:transform .18s ease, box-shadow .18s ease, background .18s;
+      z-index:20; margin-top:-300px;
+      border:2px solid rgba(0,191,255,0.6);
+    }
+    .hub .label { font-size:20px; letter-spacing:1px; color:var(--accent); font-weight:700 }
+    .hub .sub { font-size:11px; color:#7f9a9a; margin-top:6px }
+    .hub.active {
+      transform:scale(1.06);
+      box-shadow:0 0 60px rgba(0,255,255,0.3), 0 10px 60px rgba(0,0,0,0.7);
+      background:linear-gradient(135deg,#001e1e,#001214);
+    }
+
+    /* --- Pulse --- */
+    .pulse {
+      position:absolute;
+      width:calc(var(--circle-size) + 40px);
+      height:calc(var(--circle-size) + 40px);
+      border-radius:50%;
+      left:50%; top:50%; z-index:5; pointer-events:none;
+      opacity:0;
+      box-shadow:0 0 0 3px rgba(0,255,255,0.08),0 0 60px rgba(0,255,255,0.04);
+      transition:opacity .25s ease;
+      transform:translate(-50%,-50%) translateY(-300px);
+    }
+    .pulse.on { opacity:1; animation:pulseAnim 1.6s ease-out infinite }
+    @keyframes pulseAnim {
+      0%{transform:translate(-50%,-50%) translateY(-300px) scale(.9);opacity:.6}
+      70%{opacity:.08}
+      100%{transform:translate(-50%,-50%) translateY(-300px) scale(1.8);opacity:0}
+    }
+
+    /* --- Chat History --- */
+    #chat-history-container {
+      position:absolute;
+      top:350px; bottom:90px;
+      width:90%; max-width:580px;
+      overflow-y:auto; padding:15px;
+      background:rgba(0,0,0,0.4);
+      border:1px solid rgba(0,191,255,0.2);
+      border-radius:8px;
+      pointer-events:all;
+      z-index:15; left:50%; transform:translateX(-50%);
+    }
+
+    .chat-message {
+      padding:5px 0; font-size:0.95rem; line-height:1.3;
+    }
+    .chat-message.boss { text-align:right; color:#7ff; }
+    .chat-message.jarvis { text-align:left; color:var(--accent); }
+
+    /* --- Status & Hint --- */
+    .status {
+      position:absolute; bottom:70px; width:100%; text-align:center;
+      font-size:13px; color:#9fbfbf; z-index:12;
+    }
+    .hint {
+      position:absolute; top:20px; left:20px; color:#6f8f8f;
+      font-size:12px; z-index:12;
+    }
+
+    /* --- Chat Box --- */
+    #chat-box {
+      position:fixed;
+      bottom:20px; left:50%;
+      transform:translateX(-50%);
+      width:90%; max-width:580px;
+      padding:10px;
+      background:#111;
+      border:1px solid var(--accent);
+      border-radius:8px;
+      box-shadow:0 0 15px rgba(0,191,255,0.4);
+      display:flex; gap:5px;
+      z-index:30;
+    }
+
+    #chat-input {
+      flex-grow:1;
+      background:#000;
+      border:none;
+      color:var(--accent);
+      padding:10px;
+      font-size:14px;
+      outline:none;
+    }
+
+    #chat-send-btn, #chat-clear-btn {
+      background:var(--accent);
+      color:#000;
+      border:none;
+      padding:8px 15px;
+      border-radius:5px;
+      cursor:pointer;
+      font-weight:bold;
+      transition:background .2s;
+    }
+
+    #chat-send-btn:hover, #chat-clear-btn:hover {
+      background:#7ff;
+    }
+  </style>
 </head>
+
 <body>
-    <div class="stage" id="stage">
-        <canvas id="waves"></canvas>
-        <div class="pulse" id="pulse"></div>
-        <div class="hub" id="hub" title="Click to toggle (or say 'hey jarvis')">
-            <div class="label">Jarvis</div>
-            <div class="sub"><span id="listeningText">Idle</span><span class="mic-dot" id="micDot"></span></div>
-        </div>
+  <div class="stage" id="stage">
+    <canvas id="waves"></canvas>
+    <div class="pulse" id="pulse"></div>
 
-        <div id="chat-history-container">
-            </div>
-        
-        <div class="status" id="status">Say "hey jarvis" to activate voice control.</div>
-        <div class="hint">Microphone required • Click circle for text chat.</div>
+    <div class="hub" id="hub" title="Click to toggle chat">
+      <div class="label">Jarvis</div>
+      <div class="sub"><span id="listeningText">Idle</span></div>
     </div>
 
-    <div id="chat-box">
-        <input type="text" id="chat-input" placeholder="Ask a question, Boss (Text Mode)..." autofocus>
-        <button id="chat-send-btn">Send</button>
-        <button id="chat-clear-btn">Clear Chat</button> 
-    </div>
+    <div id="chat-history-container"></div>
 
-    <audio id="ttsAudio" hidden></audio>
+    <div class="status" id="status">Text Mode Active — Type below to chat.</div>
+    <div class="hint">Click circle to toggle text chat.</div>
+  </div>
 
-    <script src="./renderer.js"></script>
+  <!-- Chat input stays outside of message container -->
+  <div id="chat-box">
+    <input type="text" id="chat-input" placeholder="Ask a question, Boss (Text Mode)..." autofocus />
+    <button id="chat-send-btn">Send</button>
+    <button id="chat-clear-btn">Clear</button>
+  </div>
+
+  <script src="./renderer.js"></script>
 </body>
 </html>
