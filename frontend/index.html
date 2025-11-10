@@ -91,43 +91,67 @@
 
     /* --- Chat Box --- */
     #chat-box {
-      position:fixed;
-      bottom:20px; left:50%;
-      transform:translateX(-50%);
-      width:90%; max-width:580px;
-      padding:10px;
-      background:#111;
-      border:1px solid var(--accent);
-      border-radius:8px;
-      box-shadow:0 0 15px rgba(0,191,255,0.4);
-      display:flex; gap:5px;
-      z-index:30;
-    }
+  position: fixed;
+  bottom: 20px;
+  width: 90%;
+  max-width: 580px;
+  padding: 10px;
+  background: #111;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  box-shadow: 0 0 15px rgba(0, 191, 255, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  z-index: 30;
+  left: 50%;
+  transform: translateX(-50%);
+}
 
-    #chat-input {
-      flex-grow:1;
-      background:#000;
-      border:none;
-      color:var(--accent);
-      padding:10px;
-      font-size:14px;
-      outline:none;
-    }
+#chat-input {
+  flex-grow: 1;
+  background: #000;
+  border: none;
+  color: var(--accent);
+  padding: 10px;
+  font-size: 14px;
+  outline: none;
+  border-radius: 4px;
+}
 
-    #chat-send-btn, #chat-clear-btn {
-      background:var(--accent);
-      color:#000;
-      border:none;
-      padding:8px 15px;
-      border-radius:5px;
-      cursor:pointer;
-      font-weight:bold;
-      transition:background .2s;
-    }
+/* --- Buttons --- */
+#chat-send-btn,
+#chat-clear-btn {
+  background: var(--accent);
+  color: #000;
+  border: none;
+  padding: 8px 15px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: background 0.2s;
+  margin-left: 5px;
+}
+#chat-send-btn:hover,
+#chat-clear-btn:hover {
+  background: #7ff;
+}
 
-    #chat-send-btn:hover, #chat-clear-btn:hover {
-      background:#7ff;
-    }
+/* --- Upload Icon --- */
+#upload-label {
+  color: var(--accent);
+  font-size: 20px;
+  cursor: pointer;
+  margin-left: 10px;
+  margin-right: 8px;
+  transition: color 0.2s, transform 0.2s;
+  user-select: none;
+}
+#upload-label:hover {
+  color: #7ff;
+  transform: scale(1.2);
+}
+
   </style>
 </head>
 
@@ -149,10 +173,18 @@
 
   <!-- Chat input stays outside of message container -->
   <div id="chat-box">
-    <input type="text" id="chat-input" placeholder="Ask a question, Boss (Text Mode)..." autofocus />
-    <button id="chat-send-btn">Send</button>
-    <button id="chat-clear-btn">Clear</button>
-  </div>
+  <input type="text" id="chat-input" placeholder="Ask a question, Boss (Text Mode)..." autofocus />
+
+  <!-- Upload Button (icon style) -->
+  <label for="file-upload" id="upload-label" title="Upload Document">
+    📎
+  </label>
+  <input type="file" id="file-upload" hidden />
+
+  <button id="chat-send-btn">Send</button>
+  <button id="chat-clear-btn">Clear</button>
+</div>
+
 
   <script src="./renderer.js"></script>
 </body>

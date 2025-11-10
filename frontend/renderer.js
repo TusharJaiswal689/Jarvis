@@ -156,8 +156,47 @@ function setupTextChatListeners() {
   chatBox.classList.add("visible");
 }
 
+async function setupUploadListener() {
+  const uploadInput = document.getElementById("upload-doc");
+  if (!uploadInput) return;
+
+  uploadInput.addEventListener("change", async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    updateUI(UI_STATE.THINKING, `Uploading ${file.name}...`);
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("session_id", currentSessionId);
+
+    try {
+      const response = await fetch(`${API_URL}/upload_doc`, {
+        method: "POST",
+        body: formData,
+      });
+      const result = await response.json();
+
+      if (result.status === "success") {
+        displayMessage("Jarvis", `Document "${result.filename}" added successfully, Boss. Ready for queries.`);
+        updateUI(UI_STATE.IDLE, "Document added successfully!");
+      } else {
+        displayMessage("Jarvis", `Sorry Boss, I couldn't process that file: ${result.error || "Unknown error"}.`);
+        updateUI(UI_STATE.IDLE, "Error in upload.");
+      }
+    } catch (err) {
+      console.error("Upload failed:", err);
+      displayMessage("Jarvis", "My apologies, Boss. Upload failed due to a network or server issue.");
+      updateUI(UI_STATE.IDLE, "Upload failed.");
+    } finally {
+      event.target.value = ""; // Reset file input
+    }
+  });
+}
+
 // === Initialize ===
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
   setupTextChatListeners();
+  setupUploadListener();   // <-- ADD THIS LINE
   updateUI(UI_STATE.IDLE);
 });
+
