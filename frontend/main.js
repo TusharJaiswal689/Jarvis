@@ -1,42 +1,57 @@
 // frontend/main.js
-
-const { app, BrowserWindow, screen } = require('electron');
+const { app, BrowserWindow, Menu, screen } = require('electron');
 const path = require('path');
 
-// --- Configuration ---
-const INITIAL_WINDOW_WIDTH = 600; 
-const INITIAL_WINDOW_HEIGHT = 700; 
+const INITIAL_WINDOW_WIDTH = 600;
+const INITIAL_WINDOW_HEIGHT = 700;
 
 function createWindow() {
-    const primaryDisplay = screen.getPrimaryDisplay();
-    const { width, height } = primaryDisplay.workAreaSize;
+  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
 
-    const mainWindow = new BrowserWindow({
-        width: INITIAL_WINDOW_WIDTH,
-        height: INITIAL_WINDOW_HEIGHT,
-        x: Math.floor((width - INITIAL_WINDOW_WIDTH) / 2),
-        y: Math.floor((height - INITIAL_WINDOW_HEIGHT) / 2),
-        
-        frame: true, // Enable standard window frame
-        resizable: true, // Allows resizing
-        transparent: false, 
-        webPreferences: {
-            nodeIntegration: true,
-            contextIsolation: false,
-        }
-    });
+  const win = new BrowserWindow({
+    width: INITIAL_WINDOW_WIDTH,
+    height: INITIAL_WINDOW_HEIGHT,
+    x: Math.floor((width - INITIAL_WINDOW_WIDTH) / 2),
+    y: Math.floor((height - INITIAL_WINDOW_HEIGHT) / 2),
 
-    mainWindow.loadFile(path.join(__dirname, 'index.html'));
+    // ✅ Keep native title bar & controls
+    frame: true,
+    resizable: true,
+    backgroundColor: '#000',
+
+    // (optional) On Windows, this hides menu bar if it ever existed
+    // and prevents Alt from showing it
+    autoHideMenuBar: true,
+
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false,
+    },
+  });
+
+  // ✅ Remove File/Edit/View menu entirely
+  Menu.setApplicationMenu(null);
+  win.setMenuBarVisibility(false);
+
+  win.loadFile(path.join(__dirname, 'index.html'));
+
+  // win.webContents.openDevTools(); // <- uncomment for debugging
 }
 
 app.whenReady().then(() => {
-    createWindow();
+  createWindow();
 
-    app.on('activate', function () {
-        if (BrowserWindow.getAllWindows().length === 0) createWindow();
-    });
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
 });
 
-app.on('window-all-closed', function () {
-    if (process.platform !== 'darwin') app.quit();
+app.on('window-all-closed', () => {
+  // Quit on all platforms except macOS (standard Electron behavior)
+  if (process.platform !== 'darwin') app.quit();
+});
+
+// Clean up unhandled promise warnings in the console
+process.on('unhandledRejection', (reason) => {
+  console.warn('⚠️ Unhandled rejection:', reason);
 });

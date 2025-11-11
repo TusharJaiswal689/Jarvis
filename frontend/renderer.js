@@ -15,8 +15,8 @@ const chatHistoryContainer = document.getElementById("chat-history-container");
 
 // === UI States ===
 const UI_STATE = {
-  IDLE: { text: "Text Mode Active — Ready for input.", ringClass: "", pulsing: false },
-  THINKING: { text: "Jarvis is thinking...", ringClass: "active", pulsing: true },
+  IDLE: { text: "Text Mode Active — Ready for input.", pulsing: false },
+  THINKING: { text: "Jarvis is thinking...", pulsing: true },
 };
 
 // === UI Helpers ===
@@ -36,9 +36,10 @@ function setInputLock(isLocked) {
 }
 
 function updateUI(state, customText = null) {
-  statusText.innerText = customText || state.text;
+  const text = customText || state.text;
+  statusText.innerText = text;
+  statusDiv.innerText = text;
   pulse.classList.toggle("on", state.pulsing);
-  statusDiv.innerText = customText || state.text;
   setInputLock(state === UI_STATE.THINKING);
 }
 
@@ -46,7 +47,14 @@ function updateUI(state, customText = null) {
 function displayMessage(sender, text) {
   const msg = document.createElement("div");
   msg.classList.add("chat-message", sender.toLowerCase());
-  msg.innerHTML = `<strong>${sender}:</strong> ${text}`;
+
+  if (sender === "Jarvis") {
+    const parsedHTML = marked.parse(text || ""); // render Markdown
+    msg.innerHTML = `<strong>${sender}:</strong> ${parsedHTML}`;
+  } else {
+    msg.innerHTML = `<strong>${sender}:</strong> ${text}`;
+  }
+
   chatHistoryContainer.appendChild(msg);
   chatHistoryContainer.scrollTop = chatHistoryContainer.scrollHeight;
 }
@@ -84,6 +92,7 @@ async function submitTextQuery(question) {
     jarvisMsg.innerHTML = `<strong>Jarvis:</strong> `;
     chatHistoryContainer.appendChild(jarvisMsg);
 
+    // Stream incoming text
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -91,8 +100,9 @@ async function submitTextQuery(question) {
       const chunk = decoder.decode(value, { stream: true });
       fullText += chunk;
 
-      // Update streamed content live
-      jarvisMsg.innerHTML = `<strong>Jarvis:</strong> ${fullText}`;
+      // Render Markdown live
+      const parsedHTML = marked.parse(fullText);
+      jarvisMsg.innerHTML = `<strong>Jarvis:</strong> ${parsedHTML}`;
       chatHistoryContainer.scrollTop = chatHistoryContainer.scrollHeight;
     }
 
@@ -105,14 +115,11 @@ async function submitTextQuery(question) {
 
 // === Main Handler ===
 async function handleChatSubmission(question) {
-  // Add Boss message
   displayMessage("Boss", question);
   updateUI(UI_STATE.THINKING, "Processing your query...");
 
-  // Send query to backend
   const textResponse = await submitTextQuery(question);
 
-  // Unlock input after completion
   updateUI(UI_STATE.IDLE, "Text Mode Active");
   setInputLock(false);
 }
@@ -123,26 +130,30 @@ function setupTextChatListeners() {
   const chatSendBtn = document.getElementById("chat-send-btn");
   const chatClearBtn = document.getElementById("chat-clear-btn");
 
-  // Send button
   chatSendBtn.addEventListener("click", async () => {
-    const question = chatInput.value.trim();
-    if (!question || isThinking) return;
-    chatInput.value = "";
-    await handleChatSubmission(question);
+  const question = chatInput.value.trim();
+  if (!question || isThinking) return;
+
+  chatInput.value = "";
+  await handleChatSubmission(question);
+
+  // ✅ Instantly refocus on chat input after sending
+  setTimeout(() => chatInput.focus(), 100);
   });
 
-  // Press Enter
+
   chatInput.addEventListener("keypress", (event) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      chatSendBtn.click();
+  if (event.key === "Enter") {
+    event.preventDefault();
+    chatSendBtn.click();
+
+    // ✅ Keep the input focused even after sending
+    setTimeout(() => chatInput.focus(), 100);
     }
   });
 
-  // Clear button
   chatClearBtn.addEventListener("click", clearChatHistory);
 
-  // Hub toggle
   hub.addEventListener("click", () => {
     chatBox.classList.toggle("visible");
     if (chatBox.classList.contains("visible")) {
@@ -156,15 +167,44 @@ function setupTextChatListeners() {
   chatBox.classList.add("visible");
 }
 
+// === File Upload ===
 async function setupUploadListener() {
-  const uploadInput = document.getElementById("upload-doc");
-  if (!uploadInput) return;
+  const uploadInput = document.getElementById("file-upload");
+  const uploadLabel = document.getElementById("upload-label");
+  if (!uploadInput || !uploadLabel) return;
+
+  // Disable upload icon when Jarvis is processing
+  function toggleUploadLock(lock) {
+    if (lock) {
+      uploadLabel.style.opacity = "0.5";
+      uploadLabel.style.pointerEvents = "none";
+      uploadInput.disabled = true;
+    } else {
+      uploadLabel.style.opacity = "1";
+      uploadLabel.style.pointerEvents = "auto";
+      uploadInput.disabled = false;
+    }
+  }
+
+  // Add listener for file changes
+  uploadInput.addEventListener("click", (event) => {
+    // Prevent the file picker from even opening when busy
+    if (isThinking) {
+      event.preventDefault();
+      alert("Hold on, Boss — I'm still working on your last request.");
+    }
+  });
 
   uploadInput.addEventListener("change", async (event) => {
     const file = event.target.files[0];
     if (!file) return;
 
+    // Lock everything while uploading
+    isThinking = true;
+    toggleUploadLock(true);
+    setInputLock(true);
     updateUI(UI_STATE.THINKING, `Uploading ${file.name}...`);
+
     const formData = new FormData();
     formData.append("file", file);
     formData.append("session_id", currentSessionId);
@@ -174,6 +214,7 @@ async function setupUploadListener() {
         method: "POST",
         body: formData,
       });
+
       const result = await response.json();
 
       if (result.status === "success") {
@@ -189,6 +230,10 @@ async function setupUploadListener() {
       updateUI(UI_STATE.IDLE, "Upload failed.");
     } finally {
       event.target.value = ""; // Reset file input
+      isThinking = false;
+      toggleUploadLock(false);
+      setInputLock(false);
+      document.getElementById("chat-input").focus(); // Refocus chat box
     }
   });
 }
@@ -196,7 +241,6 @@ async function setupUploadListener() {
 // === Initialize ===
 document.addEventListener("DOMContentLoaded", async () => {
   setupTextChatListeners();
-  setupUploadListener();   // <-- ADD THIS LINE
+  setupUploadListener();
   updateUI(UI_STATE.IDLE);
 });
-

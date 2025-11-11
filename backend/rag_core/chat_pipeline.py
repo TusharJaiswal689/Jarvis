@@ -1,5 +1,6 @@
 import os
 import logging
+import random
 from typing import Dict, Any, List
 from dotenv import load_dotenv
 
@@ -11,7 +12,7 @@ from langchain_ollama.llms import OllamaLLM
 from langchain_pinecone import PineconeVectorStore
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.chat_history import InMemoryChatMessageHistory, BaseChatMessageHistory
-from langchain_classic.chains import create_retrieval_chain, create_history_aware_retriever
+from langchain_classic.chains import create_history_aware_retriever
 from langchain_core.messages import HumanMessage, AIMessage
 
 # --- Configuration ---
@@ -27,15 +28,29 @@ BGE_MODEL_NAME = os.getenv("BGE_MODEL_NAME", "BAAI/bge-small-en-v1.5")
 
 # --- System Prompt ---
 JARVIS_SYSTEM_PROMPT = """
-You are Jarvis, a highly intelligent, witty, and sophisticated AI assistant.
-Always maintain a British, professional, and slightly humorous tone, similar to the original fictional AI.
-Address the user as 'Boss' in every response.
-Keep answers concise, polished, and formatted neatly in markdown or bullet points.
-Use the context provided below to answer questions accurately.
+You are Jarvis — a highly intelligent, eloquent, and slightly witty AI assistant with a refined British tone. You speak with precision, composure, and dry humor. Always address the user as “Boss.”
 
-If the answer is not in the context, respond with:
-"I apologize, Boss, but that information appears to be outside my current knowledge base."
-Do not hallucinate information.
+Your purpose is to help the Boss with information, reasoning, and simple coding or analytical tasks using the provided CONTEXT. Stay confident, articulate, and respectful, with occasional subtle humor. Never act robotic or generic.
+
+When replying:
+
+Write in full sentences with perfect grammar and punctuation.
+
+Keep answers concise unless the Boss requests more detail.
+
+Use bullet points or paragraphs for readability.
+
+Always sound calm, clever, and professional.
+
+Knowledge rules:
+You must only use the CONTEXT below, which contains the Boss’s private notes and files.
+If an answer isn’t found there, say:
+“I apologize, Boss, but that appears to be outside my current knowledge base.”
+If the question is unrelated, say:
+“I’m sorry, Boss, but perhaps you should’ve added that to your college notes as well.”
+
+You may tease or joke lightly, but never disrespectfully. Stay focused, composed, and dependable.
+
 
 CONTEXT:
 {context}
@@ -94,8 +109,36 @@ def get_jarvis_chain():
 
         # --- Define RAG logic inside RunnableLambda ---
         def rag_logic(inputs: Dict[str, Any]) -> str:
-            question = inputs.get("input")
+            question = inputs.get("input", "").strip()
             chat_history = inputs.get("chat_history", [])
+
+            # === SMART SMALL-TALK DETECTION ===
+            q_lower = question.lower()
+
+            # Short and casual → likely greeting or small talk
+            casual_keywords = [
+                "hey", "hi", "hello", "yo", "hola", "what’s up", "how are you",
+                "how’s it going", "good morning", "good evening", "good night",
+                "sup", "jarvis?", "you there", "are you online"
+            ]
+
+            def is_smalltalk(text: str) -> bool:
+                # short messages under ~5 words with casual tone
+                return (
+                    len(text.split()) <= 5
+                    and any(kw in text for kw in casual_keywords)
+                    and not any(term in text for term in ["explain", "define", "what is", "how to", "why", "?"])
+                )
+
+            if is_smalltalk(q_lower):
+                responses = [
+                    "At your service, Boss.",
+                    "Good day, Boss. How may I assist you?",
+                    "Right here, Boss — systems operational.",
+                    "Indeed, Boss. What’s on today’s agenda?",
+                    "Always listening, Boss. How can I help?",
+                ]
+                return random.choice(responses)
 
             # Retrieve documents
             retrieved_docs = history_aware_retriever.invoke({
